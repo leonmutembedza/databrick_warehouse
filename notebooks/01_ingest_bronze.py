@@ -8,7 +8,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import uuid
@@ -27,12 +26,12 @@ from pyspark.sql.types import (
 
 dbutils.widgets.text(
     "raw_path",
-    "/Volumes/<catalog>/<schema>/<volume>/landing/bidmc/1.0.0",
+    "/Volumes/thesis_biomed/bronze/raw_files/landing/bidmc/1.0.0",
     "Raw BIDMC folder in Unity Catalog Volume",
 )
-dbutils.widgets.text("manifest_table", "<catalog>.<schema>.file_manifest", "Bronze Delta manifest table")
+dbutils.widgets.text("manifest_table", "thesis_biomed.bronze.file_manifest", "Bronze Delta manifest table")
 dbutils.widgets.text("run_id", "", "Workflow run ID; blank creates a manual run ID")
-dbutils.widgets.text("file_limit", "5", "Maximum files for initial run; 0 processes all files")
+dbutils.widgets.text("file_limit", "0", "Maximum files to process; 0 processes all files")
 
 raw_path = dbutils.widgets.get("raw_path").rstrip("/")
 manifest_table = dbutils.widgets.get("manifest_table").strip()
@@ -44,8 +43,8 @@ dataset = "bidmc"
 dataset_version = "1.0.0"
 license_reference = "https://physionet.org/content/bidmc/1.0.0/"
 
-if not raw_path.startswith("/Volumes/") or "<catalog>" in raw_path:
-    raise ValueError("Set raw_path to the actual /Volumes/<catalog>/<schema>/<volume>/... location.")
+if not raw_path.startswith("/Volumes/"):
+    raise ValueError("raw_path must be a Unity Catalog Volume path beginning with /Volumes/.")
 if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*", manifest_table):
     raise ValueError("manifest_table must be a three-part catalog.schema.table identifier.")
 if file_limit < 0:

@@ -24,21 +24,20 @@ resources/    Databricks Workflow setup guide
 
 ## Landing and table locations
 
-Create a Unity Catalog Volume for immutable source files. Configure the actual catalog, schema, and volume names in the Databricks workspace; this repository intentionally contains placeholders rather than account-specific identifiers.
+The thesis workspace uses the Unity Catalog Volume below for immutable BIDMC source files:
 
 ```text
-/Volumes/<catalog>/<schema>/<volume>/landing/<dataset>/<dataset_version>/...
+/Volumes/thesis_biomed/bronze/raw_files/landing/<dataset>/<dataset_version>/...
 ```
 
 Bronze manifests should store the corresponding Volume URI in `raw_uri`; decoded files should remain in the raw landing zone. Write curated metadata and features to Delta tables.
 
 ## First milestone
 
-1. Create the catalog/schema and raw Volume in Databricks.
+1. Create the catalog and schemas in Databricks. **Catalog, schemas, and `thesis_biomed.bronze.raw_files` Volume are created** in the workspace.
 2. Download the selected BIDMC CSV files and documentation; record checksums and dataset terms.
-3. Upload the extracted BIDMC CSV files to the Volume landing path above.
-4. Run [the bootstrap SQL](resources/sql/bootstrap.sql) after replacing `YOUR_CATALOG` with the catalog available in the workspace.
-5. Upload [the first ingestion notebook](notebooks/01_ingest_bronze.py) to the workspace and create the one-task Workflow described in [the setup guide](resources/workflow_setup.md).
-6. Run a small bounded file subset, inspect `bronze.file_manifest`, and repeat the same run. Exact replays should add zero records; a changed checksum for the same source key should fail visibly for review.
+3. Upload the extracted BIDMC CSV files to `/Volumes/thesis_biomed/bronze/raw_files/landing/bidmc/1.0.0/`.
+4. The bootstrap SQL has already been run. Upload [the first ingestion notebook](notebooks/01_ingest_bronze.py) to the workspace and create the one-task Workflow described in [the setup guide](resources/workflow_setup.md).
+5. Run a small bounded file subset, inspect `thesis_biomed.bronze.file_manifest`, and repeat the same run. Exact replays should add zero records; a changed checksum for the same source key should fail visibly for review.
 
 Do not run the full datasets until the small-batch replay behavior is confirmed. Never place real patient-identifiable data in the Free Edition workspace.
