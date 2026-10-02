@@ -1,0 +1,47 @@
+# Public research datasets selected for the thesis. Verify version-specific
+# terms before downloading or publishing derived data.
+
+[bidmc]
+name = "BIDMC PPG and Respiration Dataset"
+version = "1.0.0"
+modality_family = "physiological_signals"
+modalities = ["ppg", "ecg", "respiration"]
+source_url = "https://physionet.org/content/bidmc/1.0.0/"
+access_mode = "public_download"
+recommended_first_run = true
+landing_subpath = "bidmc/1.0.0"
+formats = ["csv", "wfdb", "mat"]
+
+[ptb_xl]
+name = "PTB-XL"
+version = "1.0.0"
+modality_family = "physiological_signals"
+modalities = ["ecg"]
+source_url = "https://physionet.org/content/ptb-xl/1.0.0/"
+access_mode = "public_download"
+recommended_first_run = false
+landing_subpath = "ptb-xl/1.0.0"
+formats = ["wfdb"]
+
+[icbhi_2017]
+name = "ICBHI 2017 Respiratory Sound Database"
+version = "official_release"
+modality_family = "respiratory_audio"
+modalities = ["respiratory_audio"]
+source_url = "https://bhichallenge.med.auth.gr/"
+access_mode = "research_download"
+recommended_first_run = false
+landing_subpath = "icbhi-2017/official_release"
+formats = ["wav", "txt"]
+
+[rsna_pneumonia]
+name = "RSNA Pneumonia Detection Challenge"
+version = "stage_2"
+modality_family = "chest_xray"
+modalities = ["chest_xray"]
+source_url = "https://www.kaggle.com/competitions/rsna-pneumonia-detection-challenge/data"
+rules_url = "https://www.kaggle.com/competitions/rsna-pneumonia-detection-challenge/rules"
+access_mode = "account_and_rules_acceptance"
+recommended_first_run = false
+landing_subpath = "rsna-pneumonia/stage_2"
+formats = ["dcm", "csv"]

@@ -1,0 +1,66 @@
+version: "0.1.0"
+status: draft
+notes:
+  - Thresholds are engineering checks, not clinical acceptance criteria.
+  - Profile each selected source release before fixing numeric thresholds.
+  - Hard failures go to Quarantine; warnings are retained in dq_rule_results.
+
+rules:
+  - rule_id: file_readable
+    modality: [ecg, ppg, respiration, respiratory_audio, chest_xray, physiological_signals]
+    severity: fail
+    check: decoder_returns_payload
+    threshold: null
+  - rule_id: non_empty_payload
+    modality: [ecg, ppg, respiration, respiratory_audio, chest_xray, physiological_signals]
+    severity: fail
+    check: payload_size_bytes
+    operator: greater_than
+    threshold: 0
+  - rule_id: signal_numeric_finite
+    modality: [ecg, ppg, respiration, physiological_signals]
+    severity: fail
+    check: count_non_finite_samples
+    operator: equals
+    threshold: 0
+  - rule_id: signal_min_duration
+    modality: [ecg, ppg, respiration, physiological_signals]
+    severity: warn
+    check: duration_seconds
+    operator: greater_than_or_equal
+    threshold: null
+    threshold_status: profile_before_setting
+  - rule_id: signal_clipping_fraction
+    modality: [ecg, ppg, respiration, physiological_signals]
+    severity: warn
+    check: clipped_sample_fraction
+    operator: less_than_or_equal
+    threshold: null
+    threshold_status: profile_before_setting
+  - rule_id: audio_duration
+    modality: [respiratory_audio]
+    severity: warn
+    check: duration_seconds
+    operator: greater_than_or_equal
+    threshold: null
+    threshold_status: profile_before_setting
+  - rule_id: audio_silence_fraction
+    modality: [respiratory_audio]
+    severity: warn
+    check: silence_fraction
+    operator: less_than_or_equal
+    threshold: null
+    threshold_status: profile_before_setting
+  - rule_id: dicom_dimensions
+    modality: [chest_xray]
+    severity: fail
+    check: rows_and_columns
+    operator: greater_than
+    threshold: 0
+  - rule_id: image_brightness_outlier
+    modality: [chest_xray]
+    severity: warn
+    check: pixel_intensity_percentiles
+    operator: within_profiled_range
+    threshold: null
+    threshold_status: profile_before_setting
