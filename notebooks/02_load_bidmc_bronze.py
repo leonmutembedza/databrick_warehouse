@@ -148,7 +148,7 @@ def build_quality_results(filename: str, record_id: str, frame, row_count: int) 
         ),
         make_rule_result(
             record_id, modality, "duplicate_time_values", "WARN", duplicate_times == 0,
-            duplicate_times, "0 duplicate time values", 
+            duplicate_times, "0 duplicate time values",
             f"{duplicate_times} rows share a timestamp" if duplicate_times else None,
         ),
     ]
