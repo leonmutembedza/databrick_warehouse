@@ -29,6 +29,7 @@ version = "kaggle-vbookshelf-snapshot"
 modality_family = "respiratory_audio"
 modalities = ["respiratory_audio"]
 source_url = "https://www.kaggle.com/datasets/vbookshelf/respiratory-sound-database"
+source_dataset_id = "vbookshelf/respiratory-sound-database"
 access_mode = "kaggle_account_download"
 recommended_first_run = false
 landing_subpath = "icbhi-2017/kaggle_vbookshelf"

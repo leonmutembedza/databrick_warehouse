@@ -43,9 +43,13 @@ ICBHI respiratory-audio branch:
 - register_icbhi_files -> notebooks/13_register_landed_files.py; depends on land_icbhi_audio.
   raw_path=<same ICBHI path>, dataset=icbhi-2017,
   dataset_version=kaggle-vbookshelf-snapshot,
+  source_dataset_id=vbookshelf/respiratory-sound-database,
   license_reference=https://www.kaggle.com/datasets/vbookshelf/respiratory-sound-database.
 - extract_icbhi_audio_bronze -> notebooks/15_extract_icbhi_bronze.py; depends on register_icbhi_files.
-  source_version=kaggle-vbookshelf-snapshot, max_recordings=5.
+  source_version=kaggle-vbookshelf-snapshot,
+  kaggle_dataset_id=vbookshelf/respiratory-sound-database, max_recordings=5.
+  The registration task must validate source_metadata.json and persist Kaggle mirror provenance;
+  extraction must verify the source dataset ID/version and WAV/TXT checksums from the manifest.
   Outputs: thesis_biomed.bronze.icbhi_audio_records and thesis_biomed.bronze.icbhi_cycle_annotations.
   IMPORTANT: Kaggle currently lists the mirror license as Unknown. Preserve that caveat in
   metadata and do not represent it as license-cleared for research/publication without review.

@@ -3,6 +3,11 @@
 
 from __future__ import annotations
 
+# Serverless Python-file tasks need Spark initialized as the first notebook command.
+from databricks.connect import DatabricksSession
+
+spark = DatabricksSession.builder.serverless().profile("DEFAULT").getOrCreate()
+
 import hashlib
 import json
 from pathlib import Path
@@ -15,10 +20,12 @@ from pyspark.sql.types import BooleanType, DoubleType, IntegerType, LongType, St
 
 dbutils.widgets.text("manifest_table", "thesis_biomed.bronze.file_manifest", "Bronze file manifest")
 dbutils.widgets.text("source_version", "kaggle-vbookshelf-snapshot", "ICBHI Kaggle mirror snapshot version")
+dbutils.widgets.text("kaggle_dataset_id", "vbookshelf/respiratory-sound-database", "Kaggle mirror owner/dataset ID")
 dbutils.widgets.text("max_recordings", "5", "Recordings per run; 0 means all")
 dbutils.widgets.text("run_id", "", "Run ID")
 manifest_table = dbutils.widgets.get("manifest_table").strip()
 source_version = dbutils.widgets.get("source_version").strip()
+kaggle_dataset_id = dbutils.widgets.get("kaggle_dataset_id").strip()
 max_recordings = int(dbutils.widgets.get("max_recordings"))
 run_id = dbutils.widgets.get("run_id").strip() or f"icbhi-bronze-{uuid.uuid4().hex}"
 if max_recordings < 0:
@@ -26,13 +33,39 @@ if max_recordings < 0:
 manifest = spark.table(manifest_table).where(
     (F.col("source_dataset") == "icbhi-2017")
     & (F.col("source_version") == source_version)
-    & (F.lower(F.col("file_format")) == "wav")
-).select("source_record_key", "raw_uri", "file_checksum").orderBy("source_record_key")
+).select("source_record_key", "raw_uri", "file_checksum", "source_metadata").orderBy("source_record_key")
+all_manifest_rows = manifest.collect()
+manifest_by_key = {row.source_record_key: row for row in all_manifest_rows}
+for manifest_row in all_manifest_rows:
+    metadata = manifest_row.source_metadata or {}
+    if metadata.get("source_platform") != "kaggle" or metadata.get("kaggle_dataset_id") != kaggle_dataset_id:
+        raise RuntimeError(
+            "ICBHI manifest row is missing expected Kaggle mirror provenance: "
+            f"{manifest_row.source_record_key}"
+        )
+if not all_manifest_rows:
+    raise RuntimeError("No ICBHI WAV files in the manifest; land and register audio files first")
+archive_checksums = {str((row.source_metadata or {}).get("download_archive_sha256", "")) for row in all_manifest_rows}
+if len(archive_checksums) != 1 or not next(iter(archive_checksums), ""):
+    raise RuntimeError("ICBHI manifest contains missing or mixed Kaggle archive checksums; register one landing snapshot before extraction")
+archive_checksum = next(iter(archive_checksums))
+if len(archive_checksum) != 64 or any(char not in "0123456789abcdef" for char in archive_checksum):
+    raise RuntimeError("ICBHI manifest contains an invalid Kaggle archive SHA-256")
+manifest = [row for row in all_manifest_rows if row.source_record_key.lower().endswith(".wav")]
 if max_recordings:
-    manifest = manifest.limit(max_recordings)
-audio_files = manifest.collect()
+    audio_files = manifest[:max_recordings]
+else:
+    audio_files = manifest
 if not audio_files:
     raise RuntimeError("No ICBHI WAV files in the manifest; land and register audio files first")
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 record_rows, annotation_rows = [], []
 for row in audio_files:
@@ -40,11 +73,21 @@ for row in audio_files:
     annotation_path = audio_path.with_suffix(".txt")
     if not audio_path.is_file() or not annotation_path.is_file():
         raise FileNotFoundError(f"Expected matching WAV and TXT annotation for {row.source_record_key}")
+    annotation_key = str(Path(row.source_record_key).with_suffix(".txt")).replace("\\", "/")
+    annotation_manifest_row = manifest_by_key.get(annotation_key)
+    if annotation_manifest_row is None:
+        raise RuntimeError(f"Matching TXT annotation is not registered in the Bronze manifest: {annotation_key}")
+    if sha256_file(audio_path) != row.file_checksum:
+        raise RuntimeError(f"WAV checksum no longer matches the registered Kaggle landing file: {row.source_record_key}")
+    if sha256_file(annotation_path) != annotation_manifest_row.file_checksum:
+        raise RuntimeError(f"TXT checksum no longer matches the registered Kaggle landing file: {annotation_key}")
     with wave.open(str(audio_path), "rb") as source:
         channels, rate, frames, width = source.getnchannels(), source.getframerate(), source.getnframes(), source.getsampwidth()
         compression = source.getcomptype()
     record_rows.append({
         "source_dataset": "icbhi-2017", "source_version": source_version,
+        "kaggle_dataset_id": kaggle_dataset_id,
+        "download_archive_sha256": archive_checksum,
         "source_record_key": row.source_record_key, "file_checksum": row.file_checksum,
         "raw_uri": str(audio_path), "annotation_uri": str(annotation_path),
         "participant_id": audio_path.stem.split("_")[0], "channels": channels,
@@ -52,7 +95,7 @@ for row in audio_files:
         "duration_seconds": frames / rate if rate else None, "compression": compression,
         "extraction_run_id": run_id,
     })
-    annotation_digest = hashlib.sha256(annotation_path.read_bytes()).hexdigest()
+    annotation_digest = annotation_manifest_row.file_checksum
     with annotation_path.open("r", encoding="utf-8") as source:
         for index, line in enumerate(source):
             parts = line.strip().split()
@@ -65,6 +108,9 @@ for row in audio_files:
             if start < 0 or end <= start or crackles not in (0, 1) or wheezes not in (0, 1):
                 raise ValueError(f"Out-of-contract ICBHI annotation in {annotation_path}: {line!r}")
             annotation_rows.append({
+                "source_dataset": "icbhi-2017", "source_version": source_version,
+                "kaggle_dataset_id": kaggle_dataset_id,
+                "download_archive_sha256": archive_checksum,
                 "source_record_key": row.source_record_key, "annotation_index": index,
                 "cycle_start_seconds": start, "cycle_end_seconds": end,
                 "crackles_present": bool(crackles), "wheezes_present": bool(wheezes),
@@ -74,6 +120,8 @@ for row in audio_files:
 
 record_schema = StructType([
     StructField("source_dataset", StringType(), False), StructField("source_version", StringType(), False),
+    StructField("kaggle_dataset_id", StringType(), False),
+    StructField("download_archive_sha256", StringType(), False),
     StructField("source_record_key", StringType(), False), StructField("file_checksum", StringType(), False),
     StructField("raw_uri", StringType(), False), StructField("annotation_uri", StringType(), False),
     StructField("participant_id", StringType(), False), StructField("channels", IntegerType(), False),
@@ -82,6 +130,9 @@ record_schema = StructType([
     StructField("compression", StringType(), False), StructField("extraction_run_id", StringType(), False),
 ])
 annotation_schema = StructType([
+    StructField("source_dataset", StringType(), False), StructField("source_version", StringType(), False),
+    StructField("kaggle_dataset_id", StringType(), False),
+    StructField("download_archive_sha256", StringType(), False),
     StructField("source_record_key", StringType(), False), StructField("annotation_index", IntegerType(), False),
     StructField("cycle_start_seconds", DoubleType(), False), StructField("cycle_end_seconds", DoubleType(), False),
     StructField("crackles_present", BooleanType(), False), StructField("wheezes_present", BooleanType(), False),
@@ -105,8 +156,8 @@ def merge_delta(frame, table: str, keys: list[str]) -> tuple[int, int]:
 
 record_table = "thesis_biomed.bronze.icbhi_audio_records"
 annotation_table = "thesis_biomed.bronze.icbhi_cycle_annotations"
-record_inserted, record_replays = merge_delta(spark.createDataFrame(record_rows, record_schema), record_table, ["source_record_key", "file_checksum"])
-annotation_inserted, annotation_replays = merge_delta(spark.createDataFrame(annotation_rows, annotation_schema), annotation_table, ["source_record_key", "annotation_index", "annotation_checksum"])
+record_inserted, record_replays = merge_delta(spark.createDataFrame(record_rows, record_schema), record_table, ["source_dataset", "source_version", "source_record_key", "file_checksum"])
+annotation_inserted, annotation_replays = merge_delta(spark.createDataFrame(annotation_rows, annotation_schema), annotation_table, ["source_dataset", "source_version", "source_record_key", "annotation_index", "annotation_checksum"])
 summary = {"records_table": record_table, "annotations_table": annotation_table, "recordings": len(record_rows), "record_rows_inserted": record_inserted, "record_replays": record_replays, "annotation_rows": len(annotation_rows), "annotation_rows_inserted": annotation_inserted, "annotation_replays": annotation_replays, "run_id": run_id}
 print(json.dumps(summary, indent=2))
 dbutils.notebook.exit(json.dumps(summary))

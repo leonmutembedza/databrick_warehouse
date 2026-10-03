@@ -170,14 +170,25 @@ try:
         "dataset": "icbhi-2017",
         "dataset_version": "kaggle-vbookshelf-snapshot",
         "kaggle_dataset_id": kaggle_dataset,
+        "source_url": f"https://www.kaggle.com/datasets/{kaggle_dataset}",
         "download_archive_sha256": archive_sha256,
+        "landing_run_id": run_id,
+        "downloaded_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "landed_files": [
+            {
+                "relative_path": Path(item["path"]).relative_to(files_root).as_posix(),
+                "sha256": item["sha256"],
+                "bytes": item["bytes"],
+            }
+            for item in landed_files
+        ],
         "license_status": "Kaggle mirror license listed as Unknown; verify terms before research use or publication.",
     }
     (target / "source_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     summary = {
         **metadata,
         "landing_run_id": run_id,
-        "downloaded_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "downloaded_at": metadata["downloaded_at"],
         "recordings_landed": len(wav_paths),
         "files_landed": len(landed_files),
         "file_manifest": landed_files[:20],
