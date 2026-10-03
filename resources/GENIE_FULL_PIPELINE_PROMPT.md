@@ -5,6 +5,8 @@ Paste this into the Databricks assistant/Genie Code surface that can edit Workfl
 ```text
 Update the existing BIDMC Databricks Workflow Job in this workspace to create one unified, batch-only multi-task pipeline for all thesis dataset branches. Preserve the current BIDMC job and its task history. Do not delete/recreate the job, do not add Kafka/streaming/Auto Loader, and do not schedule it.
 
+Every task in this design must be a Databricks Notebook task pointing at the Git notebook source. Do not use Python script tasks: the task notebooks use notebook-scoped dbutils widgets and the BIDMC wrappers use a standalone %run notebook cell.
+
 Repository: Git folder for leonmutembedza/databrick_warehouse, branch main.
 Catalog: thesis_biomed. Existing layer schemas and Volume: thesis_biomed.bronze.raw_files.
 Use /Volumes/thesis_biomed/bronze/raw_files/landing/<dataset>/<version>/ for every landing path.
