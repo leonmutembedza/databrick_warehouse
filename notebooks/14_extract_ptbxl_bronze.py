@@ -4,6 +4,12 @@
 
 from __future__ import annotations
 
+# Initialize Spark before any widget access, file processing, or other notebook work.
+# Serverless Python-file tasks require an explicit Databricks Connect session.
+from databricks.connect import DatabricksSession
+
+spark = DatabricksSession.builder.serverless().profile("DEFAULT").getOrCreate()
+
 import csv
 import hashlib
 import json
