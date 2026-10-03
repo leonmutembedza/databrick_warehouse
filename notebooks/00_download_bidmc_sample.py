@@ -7,7 +7,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -61,15 +60,10 @@ for filename in source_files:
             )
         status = "already_present"
     else:
-        temp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(prefix="bidmc_", suffix=".csv", delete=False) as temp_file:
-                temp_file.write(payload)
-                temp_path = temp_file.name
-            dbutils.fs.cp(f"file:{temp_path}", destination)
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
+        # Write through the Volume's mounted path. Copying from file:/tmp with
+        # dbutils.fs.cp is blocked by shared Unity Catalog local-path enforcement.
+        with Path(destination).open("wb") as output_file:
+            output_file.write(payload)
         status = "downloaded"
 
     results.append(
