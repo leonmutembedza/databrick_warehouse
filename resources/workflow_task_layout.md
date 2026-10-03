@@ -20,11 +20,11 @@ silver_ecg  silver_ppg  silver_respiration
 
 The extraction tasks use separate notebook entrypoints and write to `thesis_biomed.bronze.bidmc_ecg`, `thesis_biomed.bronze.bidmc_ppg`, and `thesis_biomed.bronze.bidmc_respiration`. Each branch's validation and Silver task should depend only on that branch's extraction/validation task. `cross_modal_gold` must wait for all required Silver branches.
 
-Only the download, inventory, and three BIDMC extraction notebooks exist as runnable tasks today. Validation/Silver/Gold stages are DAG design, not implemented tasks; do not create placeholder tasks that report success without doing work.
+The BIDMC branch and the additional landing/manifest/Bronze notebooks are now in the repository. Validation/Silver/Gold transformations are still later stages; do not create placeholder tasks that report success without doing work.
 
 ## Full modality expansion
 
-When the respective files have been landed and parsers tested, add these independent source branches after their own inventory tasks:
+The following independent source branches use the modality-specific landing and extraction scripts below. Keep gated branches disabled until access prerequisites are met and a bounded test is reviewed:
 
 | Branch | Input | Extract task | Own downstream chain |
 |---|---|---|---|
@@ -35,9 +35,13 @@ When the respective files have been landed and parsers tested, add these indepen
 | ICBHI respiratory audio | WAV + TXT | audio/annotation extractor | audio validation → Silver → audio features |
 | RSNA chest X-ray | DICOM + CSV labels | DICOM/label extractor | image validation → Silver → image features |
 
+The concrete landing and Bronze task entrypoints are `10_land_ptbxl_ecg.py` → `14_extract_ptbxl_bronze.py`, `11_land_icbhi_audio.py` → `15_extract_icbhi_bronze.py`, and `12_land_rsna_chest_xray.py` → `16_extract_rsna_bronze.py`; each landing branch runs `13_register_landed_files.py` between landing and decoding. A full-run smoke check is `17_validate_bronze_outputs.py`.
+
+PTB-XL is pinned to v1.0.3 because PhysioNet reports that v1.0.0 files are no longer available. Its first landing defaults to five 100-Hz records. ICBHI requires the official HTTPS archive URL as a task parameter. RSNA uses Kaggle credentials from Databricks Secrets and leaves the full image archive download disabled by default; those archives are about 4 GB. The ICBHI and RSNA branches should stay disabled until their download inputs and source data are ready. See [the full-pipeline Genie prompt](GENIE_FULL_PIPELINE_PROMPT.md).
+
 PTB-XL ECG is a separate source branch even though ECG is also in BIDMC: the source format and dataset contract differ. Do not merge their raw records into one unqualified table. The shared ECG Silver contract can be harmonized later with explicit source/provenance columns.
 
-The manifest task is the synchronization point before fan-out. Extraction branches can run concurrently because they write separate modality tables. On Free Edition, begin with only the three BIDMC branches; they fit within the five concurrent-task limit. Increase concurrency only after measuring job runtime and warehouse availability.
+The manifest task is the synchronization point within each branch. Extraction branches can run concurrently because they write separate modality tables. On Free Edition, retain a low task concurrency and bounded record counts; PTB-XL's first landing defaults to five records, ICBHI to five recordings, and RSNA image download is opt-in because its archives total about 4 GB. Increase limits only after measuring job runtime, storage, and warehouse availability. The WFDB and DICOM decoders have per-task Python dependencies (`wfdb`, `pydicom`); keep those isolated to their respective tasks.
 
 ## Idempotency and acceptance checks
 

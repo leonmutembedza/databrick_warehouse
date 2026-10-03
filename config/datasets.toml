@@ -14,13 +14,13 @@ formats = ["csv", "wfdb", "mat"]
 
 [ptb_xl]
 name = "PTB-XL"
-version = "1.0.0"
+version = "1.0.3"
 modality_family = "physiological_signals"
 modalities = ["ecg"]
-source_url = "https://physionet.org/content/ptb-xl/1.0.0/"
+source_url = "https://physionet.org/content/ptb-xl/1.0.3/"
 access_mode = "public_download"
 recommended_first_run = false
-landing_subpath = "ptb-xl/1.0.0"
+landing_subpath = "ptb-xl/1.0.3"
 formats = ["wfdb"]
 
 [icbhi_2017]

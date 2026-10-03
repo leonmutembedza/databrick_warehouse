@@ -1,4 +1,6 @@
-# Prompt for Databricks Genie
+# Prompt for Databricks Genie (BIDMC-only initial setup)
+
+This is the earlier BIDMC-only prompt. The modality landing and Bronze branches are now implemented; use [GENIE_FULL_PIPELINE_PROMPT.md](GENIE_FULL_PIPELINE_PROMPT.md) to extend the existing job.
 
 Paste this into Genie in the `databrick_warehouse` Git folder context. Review the generated job settings before saving or running.
 
