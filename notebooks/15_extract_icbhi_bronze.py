@@ -14,16 +14,18 @@ from pyspark.sql.types import BooleanType, DoubleType, IntegerType, LongType, St
 
 
 dbutils.widgets.text("manifest_table", "thesis_biomed.bronze.file_manifest", "Bronze file manifest")
+dbutils.widgets.text("source_version", "kaggle-vbookshelf-snapshot", "ICBHI Kaggle mirror snapshot version")
 dbutils.widgets.text("max_recordings", "5", "Recordings per run; 0 means all")
 dbutils.widgets.text("run_id", "", "Run ID")
 manifest_table = dbutils.widgets.get("manifest_table").strip()
+source_version = dbutils.widgets.get("source_version").strip()
 max_recordings = int(dbutils.widgets.get("max_recordings"))
 run_id = dbutils.widgets.get("run_id").strip() or f"icbhi-bronze-{uuid.uuid4().hex}"
 if max_recordings < 0:
     raise ValueError("max_recordings must be zero or positive")
 manifest = spark.table(manifest_table).where(
     (F.col("source_dataset") == "icbhi-2017")
-    & (F.col("source_version") == "official_release")
+    & (F.col("source_version") == source_version)
     & (F.lower(F.col("file_format")) == "wav")
 ).select("source_record_key", "raw_uri", "file_checksum").orderBy("source_record_key")
 if max_recordings:
@@ -42,7 +44,7 @@ for row in audio_files:
         channels, rate, frames, width = source.getnchannels(), source.getframerate(), source.getnframes(), source.getsampwidth()
         compression = source.getcomptype()
     record_rows.append({
-        "source_dataset": "icbhi-2017", "source_version": "official_release",
+        "source_dataset": "icbhi-2017", "source_version": source_version,
         "source_record_key": row.source_record_key, "file_checksum": row.file_checksum,
         "raw_uri": str(audio_path), "annotation_uri": str(annotation_path),
         "participant_id": audio_path.stem.split("_")[0], "channels": channels,

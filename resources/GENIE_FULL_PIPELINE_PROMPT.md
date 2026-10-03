@@ -33,14 +33,22 @@ PTB-XL ECG branch:
 
 ICBHI respiratory-audio branch:
 - land_icbhi_audio -> notebooks/11_land_icbhi_audio.py.
-  target_path=/Volumes/thesis_biomed/bronze/raw_files/landing/icbhi-2017/official_release,
-  max_recordings=5, and a job parameter named icbhi_archive_url.
+  Remove the obsolete icbhi_archive_url job parameter and source_archive_url task parameter.
+  target_path=/Volumes/thesis_biomed/bronze/raw_files/landing/icbhi-2017/kaggle_vbookshelf,
+  kaggle_dataset=vbookshelf/respiratory-sound-database,
+  secret_scope=thesis, username_secret_key=kaggle_username, api_key_secret_key=kaggle_key,
+  max_recordings=5. Add the PyPI task library kaggle to this landing task only.
+  The script downloads the Kaggle dataset ZIP, unpacks it in temporary Volume staging,
+  then lands only the requested WAV/TXT pairs under files/ and removes staging data.
 - register_icbhi_files -> notebooks/13_register_landed_files.py; depends on land_icbhi_audio.
-  raw_path=<same ICBHI path>, dataset=icbhi-2017, dataset_version=official_release,
-  license_reference=https://bhichallenge.med.auth.gr/ICBHI_2017_Challenge.
+  raw_path=<same ICBHI path>, dataset=icbhi-2017,
+  dataset_version=kaggle-vbookshelf-snapshot,
+  license_reference=https://www.kaggle.com/datasets/vbookshelf/respiratory-sound-database.
 - extract_icbhi_audio_bronze -> notebooks/15_extract_icbhi_bronze.py; depends on register_icbhi_files.
-  max_recordings=5. No extra Python package is required for WAV header/annotation extraction.
+  source_version=kaggle-vbookshelf-snapshot, max_recordings=5.
   Outputs: thesis_biomed.bronze.icbhi_audio_records and thesis_biomed.bronze.icbhi_cycle_annotations.
+  IMPORTANT: Kaggle currently lists the mirror license as Unknown. Preserve that caveat in
+  metadata and do not represent it as license-cleared for research/publication without review.
 
 RSNA chest-X-ray branch:
 - land_rsna_chest_xray -> notebooks/12_land_rsna_chest_xray.py.
@@ -58,7 +66,7 @@ Add a final validate_bronze_outputs task using notebooks/17_validate_bronze_outp
 
 IMPORTANT ENABLEMENT / TEST RULES:
 - Keep the existing BIDMC branch enabled.
-- Create and save all branches, but disable the ICBHI and RSNA landing/registration/extraction tasks until the user supplies the official ICBHI HTTPS archive URL and creates both Kaggle secrets, accepts the Kaggle competition rules, and lands DICOM image files. Disable dependent tasks in those branches too.
+- Create and save all branches, but disable ICBHI and RSNA landing/registration/extraction tasks until both Kaggle secrets exist in the thesis scope. ICBHI must use the Kaggle mirror ID and the distinct kaggle-vbookshelf-snapshot source version; keep it gated pending user review of the mirror's Unknown license status and full-download staging/storage needs. RSNA additionally requires accepting the competition rules and explicitly approving its multi-GB DICOM image download. Disable dependent tasks in those branches too.
 - PTB-XL can be enabled with the bounded 5-record setting above. Do not increase record limits or turn on full RSNA archives without user review.
 - Do not run the whole multi-dataset Job now. Save the DAG and report which tasks are enabled/disabled, the per-task libraries, and any unresolved setup requirements. Do not print secret values or include them in task parameters.
 - Do not create fake-success tasks. Keep modality branches independent; a failure in one source must not cause another source's Bronze tables to be overwritten.

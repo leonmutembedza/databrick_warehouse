@@ -1,62 +1,191 @@
 # Databricks notebook source
-# Land the official ICBHI archive (or a direct official-file URL) into the UC Volume.
-# Access/download URL must be supplied by the user; no credentials are embedded here.
+# Land a bounded selection from the Kaggle-hosted ICBHI mirror into the UC Volume.
+# The mirror is community-maintained; its Kaggle license is listed as Unknown.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
-import urllib.request
+import re
+import shutil
+import stat
+import subprocess
+import uuid
 import zipfile
 
 
-dbutils.widgets.text("source_archive_url", "", "Direct official ICBHI archive URL")
-dbutils.widgets.text("target_path", "/Volumes/thesis_biomed/bronze/raw_files/landing/icbhi-2017/official_release", "ICBHI landing folder")
+dbutils.widgets.text("target_path", "/Volumes/thesis_biomed/bronze/raw_files/landing/icbhi-2017/kaggle_vbookshelf", "ICBHI landing folder")
+dbutils.widgets.text("kaggle_dataset", "vbookshelf/respiratory-sound-database", "Kaggle dataset ID")
+dbutils.widgets.text("secret_scope", "thesis", "Databricks secret scope containing Kaggle credentials")
+dbutils.widgets.text("username_secret_key", "kaggle_username", "Kaggle username secret key")
+dbutils.widgets.text("api_key_secret_key", "kaggle_key", "Kaggle API key secret key")
 dbutils.widgets.text("max_recordings", "5", "WAV/TXT pairs to land; 0 means all")
-source_url = dbutils.widgets.get("source_archive_url").strip()
+dbutils.widgets.text("run_id", "", "Landing run ID")
+
 target = Path(dbutils.widgets.get("target_path").rstrip("/"))
+kaggle_dataset = dbutils.widgets.get("kaggle_dataset").strip()
+secret_scope = dbutils.widgets.get("secret_scope").strip()
+username_key = dbutils.widgets.get("username_secret_key").strip()
+api_key_key = dbutils.widgets.get("api_key_secret_key").strip()
 max_recordings = int(dbutils.widgets.get("max_recordings"))
-if not source_url.startswith("https://"):
-    raise ValueError("Paste the HTTPS download URL from the official ICBHI site into source_archive_url")
-if not str(target).startswith("/Volumes/"):
+run_id = dbutils.widgets.get("run_id").strip() or f"icbhi-kaggle-land-{uuid.uuid4().hex}"
+
+if not target.is_absolute() or ".." in target.parts or not str(target).startswith("/Volumes/") or len(target.parts) < 5:
     raise ValueError("target_path must be inside a Unity Catalog Volume")
+if not re.fullmatch(r"[A-Za-z0-9_-]+/[A-Za-z0-9_-]+", kaggle_dataset):
+    raise ValueError("kaggle_dataset must be a Kaggle owner/dataset identifier")
 if max_recordings < 0:
     raise ValueError("max_recordings must be zero or positive")
+if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", run_id):
+    raise ValueError("run_id may contain only letters, numbers, underscores, and hyphens")
+try:
+    kaggle_username = dbutils.secrets.get(secret_scope, username_key)
+    kaggle_key = dbutils.secrets.get(secret_scope, api_key_key)
+except Exception as exc:
+    raise RuntimeError("Kaggle credentials are unavailable; configure the thesis scope and its username/key secrets") from exc
+
+kaggle_cli = shutil.which("kaggle")
+if not kaggle_cli:
+    raise RuntimeError("Kaggle CLI is missing; add the PyPI package 'kaggle' to this landing task's environment")
+
 target.mkdir(parents=True, exist_ok=True)
-archive = target / "source" / "icbhi_2017_source.zip"
-archive.parent.mkdir(parents=True, exist_ok=True)
-if not archive.exists():
-    request = urllib.request.Request(source_url, headers={"User-Agent": "thesis-batch-pipeline/0.1"})
-    with urllib.request.urlopen(request, timeout=120) as response, archive.open("wb") as output:
-        while chunk := response.read(1024 * 1024):
-            output.write(chunk)
-if not zipfile.is_zipfile(archive):
-    raise ValueError("Downloaded ICBHI source is not a ZIP archive; check the official download URL")
+files_root = target / "files"
+files_root.mkdir(parents=True, exist_ok=True)
+staging_root = target.parent / f".{target.name}_kaggle_staging"
+staging_root.mkdir(parents=True, exist_ok=True)
+staging = staging_root / run_id
+download_dir = staging / "download"
+payload_dir = staging / "payload"
+download_dir.mkdir(parents=True, exist_ok=False)
+payload_dir.mkdir(parents=True, exist_ok=False)
 
-with zipfile.ZipFile(archive) as zipped:
-    wav_members = sorted(name for name in zipped.namelist() if name.lower().endswith(".wav"))
-    if max_recordings:
-        wav_members = wav_members[:max_recordings]
-    selected_stems = {str(PurePosixPath(name).with_suffix("")) for name in wav_members}
-    selected = set(wav_members)
-    selected.update(
-        name for name in zipped.namelist()
-        if name.lower().endswith(".txt") and str(PurePosixPath(name).with_suffix("")) in selected_stems
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def safe_extract(archive_path: Path, destination_root: Path) -> None:
+    destination_root.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive_path) as archive:
+        for member in archive.infolist():
+            normalized_name = member.filename.replace("\\", "/")
+            relative = PurePosixPath(normalized_name)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError(f"Unsafe member in Kaggle archive: {member.filename}")
+            if not relative.parts:
+                continue
+            unix_mode = (member.external_attr >> 16) & 0o170000
+            if unix_mode == stat.S_IFLNK:
+                raise ValueError(f"Symlink member is not allowed in Kaggle archive: {member.filename}")
+            destination = destination_root.joinpath(*relative.parts)
+            if member.is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, destination.open("wb") as output:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
+
+
+def unpack_nested_archives(root: Path) -> None:
+    unpacked: set[str] = set()
+    while True:
+        candidates = [path for path in root.rglob("*.zip") if str(path.resolve()) not in unpacked]
+        if not candidates:
+            return
+        for archive_path in sorted(candidates):
+            unpacked.add(str(archive_path.resolve()))
+            extract_root = archive_path.parent / f"{archive_path.stem}_contents"
+            safe_extract(archive_path, extract_root)
+            archive_path.unlink()
+
+
+def copy_landed_file(source: Path, destination: Path) -> str:
+    source_digest = sha256(source)
+    if destination.exists():
+        if sha256(destination) != source_digest:
+            raise RuntimeError(f"Existing landed file has different content; review before replacing: {destination}")
+        return source_digest
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f"{destination.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        shutil.copyfile(source, temporary)
+        if sha256(temporary) != source_digest:
+            raise IOError(f"Checksum mismatch while copying {source} to {destination}")
+        temporary.replace(destination)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return source_digest
+
+
+archive_sha256 = None
+landed_files = []
+try:
+    os.environ["KAGGLE_USERNAME"] = kaggle_username
+    os.environ["KAGGLE_KEY"] = kaggle_key
+    subprocess.run(
+        [kaggle_cli, "datasets", "download", kaggle_dataset, "--path", str(download_dir), "--force", "--quiet"],
+        check=True,
     )
-    for name in sorted(selected):
-        relative = PurePosixPath(name)
-        if relative.is_absolute() or ".." in relative.parts:
-            raise ValueError(f"Unsafe member in ICBHI archive: {name}")
-        destination = target / "files" / Path(*relative.parts)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with zipped.open(name) as source, destination.open("wb") as output:
-            while chunk := source.read(1024 * 1024):
-                output.write(chunk)
+    downloaded_archives = sorted(download_dir.glob("*.zip"))
+    if len(downloaded_archives) != 1:
+        raise RuntimeError(f"Expected one Kaggle dataset ZIP, found {len(downloaded_archives)} in {download_dir}")
+    downloaded_archive = downloaded_archives[0]
+    archive_sha256 = sha256(downloaded_archive)
+    safe_extract(downloaded_archive, payload_dir)
+    downloaded_archive.unlink()
+    unpack_nested_archives(payload_dir)
 
-manifest = []
-for path in sorted((target / "files").rglob("*")):
-    if path.is_file():
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        manifest.append({"path": str(path), "bytes": path.stat().st_size, "sha256": digest})
-print(json.dumps({"dataset": "icbhi_2017", "recordings_landed": len(wav_members), "files": len(manifest), "file_manifest": manifest[:20]}, indent=2))
+    wav_paths = sorted(path for path in payload_dir.rglob("*") if path.is_file() and path.suffix.lower() == ".wav")
+    if not wav_paths:
+        raise RuntimeError("No WAV files found in the Kaggle dataset archive; inspect its contents before retrying")
+    annotations = {
+        path.relative_to(payload_dir).with_suffix("").as_posix().casefold(): path
+        for path in payload_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() == ".txt"
+    }
+    if max_recordings:
+        wav_paths = wav_paths[:max_recordings]
+
+    for wav_path in wav_paths:
+        relative_wav = wav_path.relative_to(payload_dir)
+        annotation_key = relative_wav.with_suffix("").as_posix().casefold()
+        annotation_path = annotations.get(annotation_key)
+        if annotation_path is None:
+            raise FileNotFoundError(f"Missing matching TXT annotation for {relative_wav}")
+        relative_annotation = annotation_path.relative_to(payload_dir)
+        for source_path, relative_path in ((wav_path, relative_wav), (annotation_path, relative_annotation)):
+            destination = files_root / Path(*relative_path.parts)
+            checksum = copy_landed_file(source_path, destination)
+            landed_files.append({"path": str(destination), "bytes": destination.stat().st_size, "sha256": checksum})
+
+    metadata = {
+        "dataset": "icbhi-2017",
+        "dataset_version": "kaggle-vbookshelf-snapshot",
+        "kaggle_dataset_id": kaggle_dataset,
+        "download_archive_sha256": archive_sha256,
+        "license_status": "Kaggle mirror license listed as Unknown; verify terms before research use or publication.",
+    }
+    (target / "source_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    summary = {
+        **metadata,
+        "landing_run_id": run_id,
+        "downloaded_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "recordings_landed": len(wav_paths),
+        "files_landed": len(landed_files),
+        "file_manifest": landed_files[:20],
+    }
+    print(json.dumps(summary, indent=2))
+finally:
+    shutil.rmtree(staging, ignore_errors=True)
+    try:
+        staging_root.rmdir()
+    except OSError:
+        pass

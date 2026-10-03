@@ -24,15 +24,16 @@ landing_subpath = "ptb-xl/1.0.3"
 formats = ["wfdb"]
 
 [icbhi_2017]
-name = "ICBHI 2017 Respiratory Sound Database"
-version = "official_release"
+name = "ICBHI 2017 Respiratory Sound Database (Kaggle mirror)"
+version = "kaggle-vbookshelf-snapshot"
 modality_family = "respiratory_audio"
 modalities = ["respiratory_audio"]
-source_url = "https://bhichallenge.med.auth.gr/"
-access_mode = "research_download"
+source_url = "https://www.kaggle.com/datasets/vbookshelf/respiratory-sound-database"
+access_mode = "kaggle_account_download"
 recommended_first_run = false
-landing_subpath = "icbhi-2017/official_release"
+landing_subpath = "icbhi-2017/kaggle_vbookshelf"
 formats = ["wav", "txt"]
+license_status = "unknown; verify before research use or publication"
 
 [rsna_pneumonia]
 name = "RSNA Pneumonia Detection Challenge"
