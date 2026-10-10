@@ -6,7 +6,7 @@ from __future__ import annotations
 # Serverless Python-file tasks need Spark initialized as the first notebook command.
 from databricks.connect import DatabricksSession
 
-spark = DatabricksSession.builder.serverless().profile("DEFAULT").getOrCreate()
+spark = DatabricksSession.builder.getOrCreate()
 
 import hashlib
 import json

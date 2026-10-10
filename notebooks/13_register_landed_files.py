@@ -6,7 +6,8 @@ from __future__ import annotations
 # Serverless Python-file tasks need Spark initialized as the first notebook command.
 from databricks.connect import DatabricksSession
 
-spark = DatabricksSession.builder.serverless().profile("DEFAULT").getOrCreate()
+# Reuse the Spark session attached to this Databricks notebook/job task.
+spark = DatabricksSession.builder.getOrCreate()
 
 from datetime import datetime, timezone
 import hashlib
@@ -25,7 +26,7 @@ dbutils.widgets.text("dataset", "", "Dataset key, e.g. ptb-xl, icbhi-2017, rsna-
 dbutils.widgets.text("dataset_version", "", "Dataset release")
 dbutils.widgets.text("manifest_table", "thesis_biomed.bronze.file_manifest", "Bronze file manifest")
 dbutils.widgets.text("license_reference", "", "Official license/terms URL")
-dbutils.widgets.text("source_dataset_id", "", "Source platform dataset ID for ICBHI, e.g. Kaggle owner/dataset")
+dbutils.widgets.text("source_dataset_id", "vbookshelf/respiratory-sound-database", "Source platform dataset ID for ICBHI")
 dbutils.widgets.text("run_id", "", "Run ID; blank creates a unique ID")
 root_text = dbutils.widgets.get("raw_path").rstrip("/")
 dataset = dbutils.widgets.get("dataset").strip()

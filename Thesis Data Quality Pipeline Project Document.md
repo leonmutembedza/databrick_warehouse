@@ -1,11 +1,32 @@
 # Design and Implementation of a Data Quality Pipeline for Multimodal Biomedical Data
 
 **Project execution document**  
-Working baseline · Updated 2 October 2026
+Working baseline · Updated 3 October 2026
 
 ### Implementation status
 
-Foundation and first ingestion entry point are drafted locally: shared Bronze record contract, JSON Schema, dataset registry, draft quality-rule registry, replay classification, BIDMC Bronze notebook, bootstrap SQL, and manual Workflow setup guide. The Databricks Volume/table resources and first BIDMC run remain pending because they must be created and executed in the Databricks workspace. The environment currently has no authenticated Databricks connector, browser session, CLI, or workspace profile. See the repository [README](README.md) for the implementation layout.
+The implementation has progressed beyond the original foundation-only stage. The user reports that the catalog schemas were bootstrapped, two BIDMC CSVs were ingested successfully, the modality extraction tasks succeeded after fixing serverless Spark initialization and task dependencies, the multi-branch Databricks Workflow was configured, the updated code was pulled into the Databricks Git folder, and Kaggle username/key credentials were added to the `thesis` secret scope. These workspace/job outcomes are user-reported; this document does not claim to have independently queried Databricks today. The ICBHI Kaggle landing task has not yet been run with the newly configured credentials. See the repository [README](README.md) for the implementation layout.
+
+### Progress log · 3 October 2026
+
+#### Completed or reported successful
+
+- Resolved the Kaggle source URL problem for ICBHI by switching the landing implementation to the Kaggle-hosted mirror `vbookshelf/respiratory-sound-database`; this replaces the previous direct archive URL approach.
+- Updated the ICBHI landing and Bronze extraction scripts, dataset registry, and Workflow task instructions. The landing task reads credentials from Databricks Secrets and targets `/Volumes/thesis_biomed/bronze/raw_files/landing/icbhi-2017/kaggle_vbookshelf`.
+- Committed and pushed the ICBHI mirror changes to GitHub `main` in commit `ca4d8e5` (`Integrate ICBHI Kaggle mirror landing`). The user reports pulling those changes into the Databricks Git folder.
+- The user reports adding the Kaggle credentials to the Databricks secret scope `thesis`, under keys `kaggle_username` and `kaggle_key`. Secret values are intentionally not recorded here. Their availability to the job has not yet been confirmed by a successful task run.
+- Earlier pipeline milestones: catalog schemas were created from the bootstrap SQL; a BIDMC landing/ingest run succeeded for two CSV files; the multi-branch batch Workflow was configured with 15 tasks, four modality branches (physiological signals, respiratory audio, and chest X-ray, with ECG and PPG processed separately), and a final validation task. The user also reported successful extraction runs after the Spark initialization and dependency fixes.
+
+#### Remaining work and next execution sequence
+
+1. Review the Kaggle mirror’s data-use terms before research use or publication. Kaggle lists the mirror’s license as **Unknown**; retain this as a blocker to treating the mirror as an approved thesis source until terms are clarified.
+2. In the Databricks Job, verify `land_icbhi_audio` points to the pulled Git version of `notebooks/11_land_icbhi_audio.py`, uses the `thesis` / `kaggle_username` / `kaggle_key` secret references, and has the `kaggle` PyPI library attached to this task only. Keep `max_recordings=5` for the initial test.
+3. Run only `land_icbhi_audio`. The five-record setting limits the WAV/annotation pairs retained, not the dataset download: the task downloads and unpacks the full Kaggle mirror in temporary Volume staging before retaining the bounded subset. Check run logs, staging cleanup, the landing manifest, and the five WAV/TXT pairs under the configured landing path.
+4. If landing succeeds and source terms are acceptable, run `register_icbhi_files`, then `extract_icbhi_audio_bronze`. Confirm expected ICBHI Bronze tables, schemas, row counts, checksums, and run identifiers; record any failures and fix them before enabling the branch.
+5. Keep the RSNA branch gated until Kaggle competition rules are accepted and the multi-gigabyte image download/storage impact is explicitly reviewed. Keep all-modality validation gated until every required branch has successful outputs.
+6. Run the complete bounded batch Workflow after the branches are ready. Verify reconciliation, idempotent reruns, task-level dependencies, and the final validation results; capture the Databricks Job run ID and table counts for the thesis evidence log.
+
+No streaming components are in scope: orchestration is batch-based, and Kafka is excluded.
 
 This document records the current thesis scope and execution design. It consolidates the Notion thesis brief, planned pipeline tasks, Databricks Free Edition choice, and selected public datasets. The implementation is a repeatable batch lakehouse pipeline for assessing and preparing biomedical files for downstream analysis.
 
@@ -48,7 +69,7 @@ Use Databricks Free Edition as the primary development and batch execution platf
 
 | Data | Selected source and contents | Use and access notes |
 |---|---|---|
-| ECG | [PTB-XL, PhysioNet](https://physionet.org/content/ptb-xl/1.0.0/): 12-lead waveforms in WFDB formats, record headers, and extensive metadata. | Primary ECG ingestion and signal-quality dataset. Public anonymous dataset; cite the PhysioNet record and original paper. Check the selected version’s license and citation terms before redistribution. |
+| ECG | [PTB-XL, PhysioNet](https://physionet.org/content/ptb-xl/1.0.3/): 12-lead waveforms in WFDB formats, record headers, and extensive metadata. | Primary ECG ingestion and signal-quality dataset. Public anonymous dataset; cite the PhysioNet record and original paper. Check the selected version’s license and citation terms before redistribution. |
 | PPG and reference signals | [BIDMC PPG and Respiration Dataset, PhysioNet](https://physionet.org/content/bidmc/1.0.0/): 53 eight-minute recordings, PPG, ECG, impedance respiration, numerics, and annotations; WFDB, CSV, and MAT formats. | Small first end-to-end batch. Use CSV to validate the pipeline quickly, then WFDB for format coverage. The dataset page reports about 208 MB uncompressed. |
 | Respiratory audio | [ICBHI 2017 Respiratory Sound Database](https://bhichallenge.med.auth.gr/): respiratory recordings and cycle annotations, with associated demographic and diagnostic files. | Use WAV files and annotations to exercise audio decoding, audio-quality measures, metadata joins, and spectrogram feature extraction. The data is made available for research; verify official terms and redistribution limits before publication. |
 | Chest X-ray | [RSNA Pneumonia Detection Challenge, Kaggle](https://www.kaggle.com/competitions/rsna-pneumonia-detection-challenge/data): DICOM images, training labels, detailed class information, and bounding boxes. | Start with a small subset for DICOM, pixel, and metadata validation; expand if storage and run time allow. Kaggle account access and acceptance of competition rules are required. The dataset page reports about 3.96 GB. |
@@ -146,7 +167,7 @@ Completion means a single batch can process all selected modality families from 
 1. Thesis Project and Planned Steps to Multimodal Pipeline, Notion workspace pages, accessed 2 October 2026: [Thesis Project](https://app.notion.com/p/3a03c7189191801c9d21d28b29505a5a) and [Planned Steps](https://app.notion.com/p/3ba3c718919181119315d0374e3a83ea).
 2. Databricks, [Delta Lake architecture recommendations](https://docs.databricks.com/aws/en/lakehouse-architecture/deployment-guide/delta-lake).
 3. Databricks, [Free Edition limitations](https://docs.databricks.com/aws/en/getting-started/free-edition-limitations).
-4. Wagner et al., [PTB-XL, a large publicly available electrocardiography dataset](https://physionet.org/content/ptb-xl/1.0.0/), PhysioNet.
+4. Wagner et al., [PTB-XL, a large publicly available electrocardiography dataset](https://physionet.org/content/ptb-xl/1.0.3/), PhysioNet.
 5. Pimentel et al., [BIDMC PPG and Respiration Dataset](https://physionet.org/content/bidmc/1.0.0/), PhysioNet.
 6. [ICBHI 2017 Respiratory Sound Database](https://bhichallenge.med.auth.gr/), official challenge site.
 7. [RSNA Pneumonia Detection Challenge dataset](https://www.kaggle.com/competitions/rsna-pneumonia-detection-challenge/data) and [competition rules](https://www.kaggle.com/competitions/rsna-pneumonia-detection-challenge/rules), Kaggle.
